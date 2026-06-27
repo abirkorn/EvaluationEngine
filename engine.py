@@ -90,9 +90,9 @@ def update_user_state(user_state: dict, word_id: int, is_known: bool) -> dict:
 
     return {
         'state': user_state,
-        'estimated_theta': theta_new,
-        'delta': delta,
-        'is_converged': is_converged
+        'estimated_theta': float(theta_new),
+        'delta': float(delta),
+        'is_converged': bool(is_converged)
     }
 
 def update_user_state_passive(user_state: dict, chapter_exposures: list) -> dict:
@@ -134,10 +134,10 @@ def update_user_state_passive(user_state: dict, chapter_exposures: list) -> dict
             'delta': delta
         })
 
-    user_state['theta'] = theta
+    user_state['theta'] = float(theta)
     return {
         'state': user_state,
-        'estimated_theta': theta,
-        'total_delta': total_delta,
+        'estimated_theta': float(theta),
+        'total_delta': float(total_delta),
         'updates': updates
     }

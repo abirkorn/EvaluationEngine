@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EvaluationEngine R&D Sandbox</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .btn-knows { @apply bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-lg text-2xl transition-colors; }
+        .btn-unknown { @apply bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-8 rounded-lg text-2xl transition-colors; }
+        .trace-card { @apply bg-slate-100 p-4 rounded shadow-inner font-mono text-sm; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+    <div class="max-w-5xl mx-auto space-y-8">
+
+        <!-- Header -->
+        <header class="text-center border-b pb-4">
+            <h1 class="text-3xl font-bold text-slate-800">EvaluationEngine R&D Sandbox</h1>
+            <p class="text-slate-500">Continuous Vocabulary Assessment Algorithm Tuner</p>
+        </header>
+
+        <!-- Configuration Section -->
+        <section class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+            <h2 class="text-xl font-semibold mb-4 text-slate-700">1. Configuration</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Learning Rate (η)</label>
+                    <input type="number" id="eta" value="50.0" step="1" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm p-2 bg-slate-50 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Sigmoid Slope (β)</label>
+                    <input type="number" id="beta" value="0.005" step="0.001" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm p-2 bg-slate-50 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Convergence Delta (ε)</label>
+                    <input type="number" id="epsilon" value="0.5" step="0.1" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm p-2 bg-slate-50 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Max Questions</label>
+                    <input type="number" id="max_questions" value="15" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm p-2 bg-slate-50 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Initial Theta (Rank)</label>
+                    <input type="number" id="initial_theta" placeholder="Default (Median)" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm p-2 bg-slate-50 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">CI Decay Factor</label>
+                    <input type="number" id="ci_decay" value="0.9" step="0.01" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm p-2 bg-slate-50 border">
+                </div>
+            </div>
+            <button onclick="initSession()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition-colors">Start Clean Session</button>
+        </section>
+
+        <div id="session-container" class="hidden space-y-8">
+            <!-- Testing Zone -->
+            <section id="testing-zone" class="bg-white p-10 rounded-xl shadow-md border border-slate-200 text-center space-y-6">
+                <div id="word-display" class="space-y-2">
+                    <p class="text-slate-500 uppercase tracking-widest text-sm font-semibold">Current Word</p>
+                    <h3 id="current-word" class="text-6xl font-black text-slate-900">...</h3>
+                    <p id="word-meta" class="text-slate-500">Rank: -</p>
+                </div>
+                <div class="flex justify-center space-x-6 pt-4">
+                    <button onclick="submitResponse(true)" class="btn-knows">Knows (Y)</button>
+                    <button onclick="submitResponse(false)" class="btn-unknown">Doesn't Know (N)</button>
+                </div>
+            </section>
+
+            <!-- Convergence Card -->
+            <section id="convergence-view" class="hidden bg-green-50 p-8 rounded-xl shadow-md border-2 border-green-200 text-center animate-bounce">
+                <h3 class="text-3xl font-bold text-green-700 mb-2">Convergence Achieved!</h3>
+                <p class="text-green-600 text-lg">Final Estimated Proficiency: <span id="final-theta" class="font-bold">-</span></p>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8 text-left">
+                    <div class="bg-white p-4 rounded-lg shadow border border-green-100">
+                        <h4 class="font-bold text-slate-700 mb-3 border-b pb-2">Verification: Words BELOW Knee</h4>
+                        <ul id="list-below" class="space-y-1 text-sm text-slate-600"></ul>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow border border-red-100">
+                        <h4 class="font-bold text-slate-700 mb-3 border-b pb-2">Verification: Words ABOVE Knee</h4>
+                        <ul id="list-above" class="space-y-1 text-sm text-slate-600"></ul>
+                    </div>
+                </div>
+                <button onclick="window.scrollTo({top: 0, behavior: 'smooth'})" class="mt-8 text-green-700 underline font-medium">Back to top to restart</button>
+            </section>
+
+            <!-- Dashboard Row -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Math Trace -->
+                <div class="lg:col-span-1 space-y-4">
+                    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                        <h2 class="text-lg font-semibold mb-4 text-slate-700">Live Math Trace</h2>
+                        <div class="space-y-4">
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-slate-500 font-mono">θ (Current Level)</span>
+                                    <span id="trace-theta" class="font-bold text-indigo-600 font-mono">-</span>
+                                </div>
+                                <div class="w-full bg-slate-200 rounded-full h-2.5">
+                                    <div id="theta-progress" class="bg-indigo-600 h-2.5 rounded-full" style="width: 50%"></div>
+                                </div>
+                            </div>
+                            <div class="trace-card">
+                                <p>Delta (Δθ): <span id="trace-delta" class="font-bold">-</span></p>
+                                <p>P(Knows): <span id="trace-pknown" class="font-bold">-</span></p>
+                                <p>CI: <span id="trace-ci" class="font-bold">-</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History Log -->
+                <div class="lg:col-span-2">
+                    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200 h-full">
+                        <h2 class="text-lg font-semibold mb-4 text-slate-700">Session History Log</h2>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-slate-200">
+                                <thead class="bg-slate-50">
+                                    <tr>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Q#</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Word</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Rank</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Input</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Δθ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-body" class="divide-y divide-slate-200">
+                                    <!-- History rows added here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        let currentState = null;
+        let currentWord = null;
+        let questionCount = 0;
+        let nWords = 5930; // Will be set by init if needed
+
+        async function initSession() {
+            const config = {
+                eta: parseFloat(document.getElementById('eta').value),
+                beta: parseFloat(document.getElementById('beta').value),
+                epsilon: parseFloat(document.getElementById('epsilon').value),
+                max_questions: parseInt(document.getElementById('max_questions').value),
+                initial_theta: document.getElementById('initial_theta').value ? parseFloat(document.getElementById('initial_theta').value) : null,
+                ci_decay: parseFloat(document.getElementById('ci_decay').value)
+            };
+
+            const res = await fetch('/init', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            currentState = await res.json();
+            nWords = currentState.config.n_words;
+            questionCount = 0;
+
+            // UI Reset
+            document.getElementById('session-container').classList.remove('hidden');
+            document.getElementById('testing-zone').classList.remove('hidden');
+            document.getElementById('convergence-view').classList.add('hidden');
+            document.getElementById('history-body').innerHTML = '';
+            updateTrace(currentState.theta, 0, 0, currentState.confidence_interval);
+
+            fetchNextWord();
+        }
+
+        async function fetchNextWord() {
+            const res = await fetch('/next-word', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_state: currentState })
+            });
+            currentWord = await res.json();
+
+            if (currentWord) {
+                document.getElementById('current-word').innerText = currentWord.w;
+                document.getElementById('word-meta').innerText = `Rank: ${currentWord.rank} | POS: ${currentWord.pos} | CEFR: ${currentWord.orig_cefr}`;
+            }
+        }
+
+        async function submitResponse(isKnown) {
+            const res = await fetch('/respond', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_state: currentState,
+                    word_rank: currentWord.rank,
+                    is_known: isKnown
+                })
+            });
+
+            const result = await res.json();
+            currentState = result.state;
+            questionCount++;
+
+            // Update UI
+            updateTrace(result.estimated_theta, result.delta, currentState.history[currentState.history.length-1].p_known, currentState.confidence_interval);
+            addHistoryRow(questionCount, currentWord.w, currentWord.rank, isKnown, result.delta);
+
+            if (result.is_converged) {
+                showConvergence(result);
+            } else {
+                fetchNextWord();
+            }
+        }
+
+        function updateTrace(theta, delta, pKnown, ci) {
+            document.getElementById('trace-theta').innerText = theta.toFixed(2);
+            document.getElementById('trace-delta').innerText = (delta >= 0 ? '+' : '') + delta.toFixed(2);
+            document.getElementById('trace-delta').className = delta >= 0 ? 'font-bold text-green-600' : 'font-bold text-red-600';
+            document.getElementById('trace-pknown').innerText = pKnown.toFixed(4);
+            document.getElementById('trace-ci').innerText = ci.toFixed(2);
+
+            const percent = (theta / nWords) * 100;
+            document.getElementById('theta-progress').style.width = `${percent}%`;
+        }
+
+        function addHistoryRow(qNum, word, rank, known, delta) {
+            const row = `<tr>
+                <td class="px-4 py-2 text-sm text-slate-500">${qNum}</td>
+                <td class="px-4 py-2 text-sm font-medium text-slate-900">${word}</td>
+                <td class="px-4 py-2 text-sm text-slate-500">${rank}</td>
+                <td class="px-4 py-2 text-sm ${known ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}">${known ? 'Y' : 'N'}</td>
+                <td class="px-4 py-2 text-sm font-mono ${delta >= 0 ? 'text-green-600' : 'text-red-600'}">${(delta >= 0 ? '+' : '') + delta.toFixed(2)}</td>
+            </tr>`;
+            document.getElementById('history-body').insertAdjacentHTML('afterbegin', row);
+        }
+
+        function showConvergence(result) {
+            document.getElementById('testing-zone').classList.add('hidden');
+            document.getElementById('convergence-view').classList.remove('hidden');
+            document.getElementById('final-theta').innerText = result.estimated_theta.toFixed(2);
+
+            const belowList = document.getElementById('list-below');
+            const aboveList = document.getElementById('list-above');
+            belowList.innerHTML = '';
+            aboveList.innerHTML = '';
+
+            result.verification.below.forEach(w => {
+                const li = document.createElement('li');
+                li.innerText = `${w.w} (Rank: ${w.rank})`;
+                belowList.appendChild(li);
+            });
+
+            result.verification.above.forEach(w => {
+                const li = document.createElement('li');
+                li.innerText = `${w.w} (Rank: ${w.rank})`;
+                aboveList.appendChild(li);
+            });
+
+            document.getElementById('convergence-view').scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>
