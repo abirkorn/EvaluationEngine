@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EvaluationEngine R&D Sandbox</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         .btn-knows { @apply bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-lg text-2xl transition-colors; }
         .btn-unknown { @apply bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-8 rounded-lg text-2xl transition-colors; }
@@ -85,7 +86,20 @@
             </section>
 
             <!-- Dashboard Row -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- Charts Section -->
+                <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200 lg:col-span-2">
+                    <h2 class="text-xl font-semibold mb-6 text-slate-700">Algorithm Visualization</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div class="h-64">
+                            <canvas id="convergenceChart"></canvas>
+                        </div>
+                        <div class="h-64">
+                            <canvas id="sigmoidChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Math Trace -->
                 <div class="lg:col-span-1 space-y-4">
                     <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
@@ -142,6 +156,111 @@
         let questionCount = 0;
         let nWords = 5930; // Will be set by init if needed
 
+        let convergenceChart = null;
+        let sigmoidChart = null;
+
+        function initCharts() {
+            const convCtx = document.getElementById('convergenceChart').getContext('2d');
+            if (convergenceChart) convergenceChart.destroy();
+            convergenceChart = new Chart(convCtx, {
+                type: 'line',
+                data: {
+                    labels: [0],
+                    datasets: [{
+                        label: 'Estimated Level (θ)',
+                        data: [null],
+                        borderColor: 'rgb(79, 70, 229)',
+                        backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                        fill: true,
+                        tension: 0.2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { min: 1, max: nWords, title: { display: true, text: 'Rank' } },
+                        x: { title: { display: true, text: 'Question #' } }
+                    }
+                }
+            });
+
+            const sigCtx = document.getElementById('sigmoidChart').getContext('2d');
+            if (sigmoidChart) sigmoidChart.destroy();
+            sigmoidChart = new Chart(sigCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Knowledge Curve',
+                            data: [],
+                            borderColor: 'rgb(100, 116, 139)',
+                            borderDash: [5, 5],
+                            fill: false,
+                            pointRadius: 0,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Asked (Known)',
+                            data: [],
+                            type: 'scatter',
+                            backgroundColor: 'rgb(34, 197, 94)',
+                            pointRadius: 6
+                        },
+                        {
+                            label: 'Asked (Unknown)',
+                            data: [],
+                            type: 'scatter',
+                            backgroundColor: 'rgb(239, 68, 68)',
+                            pointRadius: 6
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { min: 0, max: 1, title: { display: true, text: 'P(Knows)' } },
+                        x: { type: 'linear', min: 1, max: nWords, title: { display: true, text: 'Word Rank' } }
+                    }
+                }
+            });
+        }
+
+        function updateCharts(history, theta, beta) {
+            // Update Convergence Chart
+            const labels = [0, ...history.map((_, i) => i + 1)];
+            let data = [];
+            if (history.length > 0) {
+                data = [history[0].theta_before, ...history.map(h => h.theta_after)];
+            } else {
+                data = [theta];
+            }
+
+            convergenceChart.data.labels = labels;
+            convergenceChart.data.datasets[0].data = data;
+            convergenceChart.update();
+
+            // Update Sigmoid Chart
+            const points = 50;
+            const step = nWords / points;
+            const curveData = [];
+            for (let i = 0; i <= points; i++) {
+                const x = Math.max(1, i * step);
+                const p = 1 / (1 + Math.exp(-beta * (theta - x)));
+                curveData.push({ x: x, y: p });
+            }
+            sigmoidChart.data.datasets[0].data = curveData;
+
+            // Update scatter points
+            const knownPoints = history.filter(h => h.known).map(h => ({ x: h.rank, y: 1 }));
+            const unknownPoints = history.filter(h => !h.known).map(h => ({ x: h.rank, y: 0 }));
+            sigmoidChart.data.datasets[1].data = knownPoints;
+            sigmoidChart.data.datasets[2].data = unknownPoints;
+            sigmoidChart.update();
+        }
+
         async function initSession() {
             const config = {
                 eta: parseFloat(document.getElementById('eta').value),
@@ -167,6 +286,13 @@
             document.getElementById('testing-zone').classList.remove('hidden');
             document.getElementById('convergence-view').classList.add('hidden');
             document.getElementById('history-body').innerHTML = '';
+
+            initCharts();
+            // Initial path point
+            convergenceChart.data.datasets[0].data = [currentState.theta];
+            convergenceChart.update();
+            updateCharts([], currentState.theta, currentState.config.beta);
+
             updateTrace(currentState.theta, 0, 0, currentState.confidence_interval);
 
             fetchNextWord();
@@ -204,6 +330,7 @@
             // Update UI
             updateTrace(result.estimated_theta, result.delta, currentState.history[currentState.history.length-1].p_known, currentState.confidence_interval);
             addHistoryRow(questionCount, currentWord.w, currentWord.rank, isKnown, result.delta);
+            updateCharts(currentState.history, result.estimated_theta, currentState.config.beta);
 
             if (result.is_converged) {
                 showConvergence(result);
