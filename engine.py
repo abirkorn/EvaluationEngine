@@ -21,8 +21,16 @@ def initialize_user_state(config: dict) -> dict:
     - max_questions: Maximum questions for assessment
     """
     n_words = config.get('n_words', 5000)
+    initial_theta = config.get('initial_theta')
+    if initial_theta is None:
+        initial_theta = n_words / 2.0
+
+    # Stochastic Initialization: Add jitter (+/- 200 ranks)
+    jitter = np.random.uniform(-200, 200)
+    initial_theta = np.clip(initial_theta + jitter, 1, n_words)
+
     state = {
-        'theta': config.get('initial_theta', n_words / 2.0),
+        'theta': float(initial_theta),
         'confidence_interval': config.get('initial_ci', float(n_words)),
         'history': [],
         'config': config
@@ -56,11 +64,16 @@ def update_user_state(user_state: dict, word_id: int, is_known: bool) -> dict:
     """
     theta_prev = user_state['theta']
     config = user_state['config']
+    history = user_state['history']
 
     beta = config.get('beta', 0.01)
-    eta = config.get('eta', 0.1)
+    eta_0 = config.get('eta', 0.1)
     epsilon = config.get('epsilon', 0.5)
     ci_decay = config.get('ci_decay', 0.9)
+
+    # Learning Rate Decay: eta_t = eta_0 / (1 + 0.3 * t)
+    t = len(history)
+    eta_t = eta_0 / (1.0 + 0.3 * t)
 
     # x is the continuous rank of the word
     x = float(word_id)
@@ -70,7 +83,7 @@ def update_user_state(user_state: dict, word_id: int, is_known: bool) -> dict:
     p_known = sigmoid(beta * (theta_prev - x))
 
     # SGD Update: theta_t = theta_{t-1} + eta * (y_t - P(x_t))
-    delta = eta * (y - p_known)
+    delta = eta_t * (y - p_known)
     theta_new = theta_prev + delta
 
     # Update state
